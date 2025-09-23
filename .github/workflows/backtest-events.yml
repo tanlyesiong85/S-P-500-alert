@@ -20,21 +20,27 @@ jobs:
 
       - name: Install dependencies
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -V
+          pip freeze | sed -n '1,80p'
 
-      - name: Run backtest (S&P 500 + Events)
+      - name: Run backtest (and always produce an artifact)
         env:
           CONFIG_PATH: config.yaml
         run: |
+          set -euxo pipefail
           mkdir -p out
-          echo ">>> Running backtest script..."
-          python backtest_events.py || true
-          echo ">>> Finished script run."
-          echo ">>> Listing project root:"
-          ls -la
-          echo ">>> Listing out folder:"
-          ls -la out || true
+          echo "artifact heartbeat $(date -u +"%Y-%m-%d %H:%M:%S UTC")" > out/heartbeat.txt
+          echo ">>> repo tree (before run)" > out/log.txt
+          ls -la >> out/log.txt
+          echo ">>> starting script" >> out/log.txt
+          python backtest_events.py 2>&1 | tee -a out/log.txt || true
+          echo ">>> repo tree (after run)" >> out/log.txt
+          ls -la >> out/log.txt
+          echo ">>> out/ listing" >> out/log.txt
+          ls -la out >> out/log.txt || true
 
       - name: Upload artifacts
         if: always()
