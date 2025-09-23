@@ -1,12 +1,10 @@
-name: TA + Event WhatsApp Alerts (Weekly Bias)
+name: Backtest S&P500 (10y) with Events
 
 on:
-  schedule:
-    - cron: "10 1 * * 1-5"   # 09:10 MYT on weekdays
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # manual run from Actions tab
 
 jobs:
-  run-alerts:
+  backtest:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,10 +22,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run signals (Tech + Events)
+      - name: Run backtest (S&P 500 + Events)
         env:
-          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
-          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
           CONFIG_PATH: config.yaml
         run: |
-          python signals.py
+          python backtest_events.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp500-backtest-with-events
+          path: |
+            out/sp500_backtest_triggers_with_events.csv
+            out/sp500_backtest_summary_with_events.txt
