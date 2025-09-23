@@ -1,0 +1,33 @@
+name: TA + Event WhatsApp Alerts (Weekly Bias)
+
+on:
+  schedule:
+    - cron: "10 1 * * 1-5"   # 09:10 MYT on weekdays
+  workflow_dispatch: {}
+
+jobs:
+  run-alerts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run signals (Tech + Events)
+        env:
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          CONFIG_PATH: config.yaml
+        run: |
+          python signals.py
