@@ -24,23 +24,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -V
-          pip freeze | sed -n '1,80p'
 
-      - name: Run backtest (and always produce an artifact)
+      - name: Run backtest (SPY proxy for S&P 500)
         env:
           CONFIG_PATH: config.yaml
         run: |
           set -euxo pipefail
           mkdir -p out
-          echo "artifact heartbeat $(date -u +"%Y-%m-%d %H:%M:%S UTC")" > out/heartbeat.txt
-          echo ">>> repo tree (before run)" > out/log.txt
-          ls -la >> out/log.txt
-          echo ">>> starting script" >> out/log.txt
-          python backtest_events.py 2>&1 | tee -a out/log.txt || true
-          echo ">>> repo tree (after run)" >> out/log.txt
-          ls -la >> out/log.txt
-          echo ">>> out/ listing" >> out/log.txt
-          ls -la out >> out/log.txt || true
+          python backtest_events.py
+          echo ">>> list out/"
+          ls -la out
 
       - name: Upload artifacts
         if: always()
