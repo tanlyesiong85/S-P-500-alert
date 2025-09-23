@@ -17,7 +17,7 @@ date,asset,event_type,bias,description
 2022-03-16,SP500,Fed,bearish,Fed starts rate hike cycle to fight inflation
 2022-06-15,SP500,Fed,bearish,75bp hike; fastest tightening since 1980s
 2022-10-13,SP500,macro,bullish,Hot CPI but capitulation intraday reversal (technical bear market flush)
-2023-03-12,SP500,macro,bullish,US authorities backstop banks (SVB/SBNY) to stabilize system
+2023-03-12,SP500,macro,bullish,US authorities backstop banks to stabilize system
 2023-07-26,SP500,Fed,bearish,Another hike; “higher for longer” messaging
 2023-12-13,SP500,Fed,bullish,Fed signals possible pivot; markets price 2024 cuts
 2024-01-31,SP500,Fed,neutral,Fed holds; data-dependent stance
