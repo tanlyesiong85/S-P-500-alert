@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,11 +28,16 @@ jobs:
           CONFIG_PATH: config.yaml
         run: |
           python backtest_events.py
+          echo "---- Listing output folder (if any) ----"
+          ls -la || true
+          echo "---- Listing ./out ----"
+          ls -la out || true
 
+      # Upload EVERYTHING inside the out/ folder, whatever the filenames are
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sp500-backtest-with-events
-          path: |
-            out/sp500_backtest_triggers_with_events.csv
-            out/sp500_backtest_summary_with_events.txt
+          path: out/**
+          if-no-files-found: warn
