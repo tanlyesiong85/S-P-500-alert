@@ -1,4 +1,5 @@
 import os
+import time
 import yaml
 import numpy as np
 import pandas as pd
@@ -7,13 +8,15 @@ from datetime import timedelta
 
 CONFIG_PATH = os.getenv("CONFIG_PATH", "config.yaml")
 
+TICKER = "SPY"          # << ETF proxy for S&P 500 (more reliable on CI)
+ASSET_NAME = "S&P 500"  # friendly label in outputs
+
 # ------------ Utils ------------
 def load_cfg(path):
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
-def sma(s, w):
-    return s.rolling(w).mean()
+def sma(s, w): return s.rolling(w).mean()
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -28,17 +31,24 @@ def pct(a, b):
     if b == 0 or np.isnan(a) or np.isnan(b): return np.nan
     return (a - b) / b * 100.0
 
-def dl_weekly(symbol, years, interval="1wk"):
-    df = yf.download(symbol, period=f"{years}y", interval=interval, auto_adjust=True, progress=False)
-    if isinstance(df, pd.DataFrame) and not df.empty:
-        df = df.rename(columns=str.title)
-    return df
+def dl_weekly(symbol, years, interval="1wk", retries=3, sleep_sec=3):
+    last_err = None
+    for attempt in range(1, retries+1):
+        try:
+            print(f">>> Downloading {symbol} ({years}y, {interval}) [try {attempt}/{retries}]")
+            df = yf.download(symbol, period=f"{years}y", interval=interval, auto_adjust=True, progress=False)
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                print(f">>> Got {len(df)} rows")
+                return df.rename(columns=str.title)
+            else:
+                last_err = "empty dataframe"
+        except Exception as e:
+            last_err = str(e)
+        time.sleep(sleep_sec)
+    raise RuntimeError(f"Failed to download {symbol}: {last_err}")
 
 # ------------ Technical Signals (weekly) ------------
 def gen_signals_weekly(df, cfg):
-    """
-    Yield dict rows of technical triggers with rationale.
-    """
     out = []
     mb = cfg["rules"]["data"]["min_bars"]
     if df is None or df.empty or len(df) < mb:
@@ -53,7 +63,8 @@ def gen_signals_weekly(df, cfg):
 
     for i in range(1, len(idx)):
         dt = idx[i]
-        row_base = {
+        base = {
+            "asset": ASSET_NAME,
             "date": dt.strftime("%Y-%m-%d"),
             "close": float(close.iloc[i]) if not np.isnan(close.iloc[i]) else None,
         }
@@ -62,9 +73,9 @@ def gen_signals_weekly(df, cfg):
         if cfg["rules"]["rsi"]["enabled"] and not np.isnan(rsi14.iloc[i]):
             r = float(rsi14.iloc[i])
             if r <= cfg["rules"]["rsi"]["oversold"]:
-                out.append({**row_base, "signal":"RSI", "direction":"bullish", "technical_rationale": f"Weekly RSI {r:.1f} ≤ {cfg['rules']['rsi']['oversold']} (oversold)"})
+                out.append({**base, "signal":"RSI", "direction":"bullish", "technical_rationale": f"Weekly RSI {r:.1f} ≤ {cfg['rules']['rsi']['oversold']} (oversold)"})
             elif r >= cfg["rules"]["rsi"]["overbought"]:
-                out.append({**row_base, "signal":"RSI", "direction":"bearish", "technical_rationale": f"Weekly RSI {r:.1f} ≥ {cfg['rules']['rsi']['overbought']} (overbought)"})
+                out.append({**base, "signal":"RSI", "direction":"bearish", "technical_rationale": f"Weekly RSI {r:.1f} ≥ {cfg['rules']['rsi']['overbought']} (overbought)"})
 
         # SMA50/200 cross
         if cfg["rules"]["sma_cross"]["enabled"] and all([
@@ -74,20 +85,20 @@ def gen_signals_weekly(df, cfg):
             prev = s50.iloc[i-1] - s200.iloc[i-1]
             curr = s50.iloc[i]   - s200.iloc[i]
             if prev < 0 <= curr:
-                out.append({**row_base, "signal":"SMA Cross", "direction":"bullish", "technical_rationale":"Golden Cross: SMA50 crossed above SMA200"})
+                out.append({**base, "signal":"SMA Cross", "direction":"bullish", "technical_rationale":"Golden Cross: SMA50 crossed above SMA200"})
             elif prev > 0 >= curr:
-                out.append({**row_base, "signal":"SMA Cross", "direction":"bearish", "technical_rationale":"Death Cross: SMA50 crossed below SMA200"})
+                out.append({**base, "signal":"SMA Cross", "direction":"bearish", "technical_rationale":"Death Cross: SMA50 crossed below SMA200"})
 
         # Price vs 200-week SMA
         if cfg["rules"]["price_vs_sma200"]["enabled"] and not np.isnan(s200.iloc[i]):
             dist = pct(close.iloc[i], s200.iloc[i])
             if not np.isnan(dist):
                 if abs(dist) <= cfg["rules"]["price_vs_sma200"]["near_pct"]:
-                    out.append({**row_base, "signal":"Price~SMA200", "direction":"bullish", "technical_rationale": f"Price within {dist:.1f}% of 200-week SMA (mean-revert zone)"})
+                    out.append({**base, "signal":"Price~SMA200", "direction":"bullish", "technical_rationale": f"Price within {dist:.1f}% of 200-week SMA (mean-revert zone)"})
                 elif dist <= -cfg["rules"]["price_vs_sma200"]["break_pct"]:
-                    out.append({**row_base, "signal":"Price<<SMA200", "direction":"bullish", "technical_rationale": f"Price {dist:.1f}% below 200-week SMA (deep discount)"})
+                    out.append({**base, "signal":"Price<<SMA200", "direction":"bullish", "technical_rationale": f"Price {dist:.1f}% below 200-week SMA (deep discount)"})
                 elif dist >= cfg["rules"]["price_vs_sma200"]["break_pct"]:
-                    out.append({**row_base, "signal":"Price>>SMA200", "direction":"bearish", "technical_rationale": f"Price {dist:.1f}% above 200-week SMA (extended)"})
+                    out.append({**base, "signal":"Price>>SMA200", "direction":"bearish", "technical_rationale": f"Price {dist:.1f}% above 200-week SMA (extended)"})
 
     return out
 
@@ -96,32 +107,24 @@ def load_events(csv_path):
     if not os.path.exists(csv_path):
         return pd.DataFrame(columns=["date","asset","event_type","bias","description"])
     df = pd.read_csv(csv_path)
-    # normalize
-    df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_convert(None)
+    df["date"] = pd.to_datetime(df["date"])
     df["bias"] = df["bias"].str.lower()
     return df
 
 def align_events(tech_df, events_df, window_days):
-    """
-    For each technical trigger, find the nearest event within ±window_days.
-    If multiple exist, take the one with the smallest absolute date diff.
-    """
-    if events_df.empty or tech_df.empty:
-        tech_df["event_date"] = None
-        tech_df["event_bias"] = None
-        tech_df["event_type"] = None
-        tech_df["event_description"] = None
-        tech_df["aligned"] = False
-        tech_df["alignment_reason"] = "no_events"
-        return tech_df
+    if tech_df.empty:
+        return tech_df.assign(event_date=None, event_bias=None, event_type=None,
+                              event_description=None, aligned=False, alignment_reason="no_tech")
+    if events_df.empty:
+        return tech_df.assign(event_date=None, event_bias=None, event_type=None,
+                              event_description=None, aligned=False, alignment_reason="no_events")
 
     tech_df = tech_df.copy()
     tech_df["date_dt"] = pd.to_datetime(tech_df["date"])
     window = pd.Timedelta(days=window_days)
 
-    e = events_df.copy()
-    e = e.sort_values("date")
-    # Build fast lookup by window
+    e = events_df.copy().sort_values("date")
+
     results = []
     for _, tr in tech_df.iterrows():
         tdate = tr["date_dt"]
@@ -130,12 +133,11 @@ def align_events(tech_df, events_df, window_days):
         if cand.empty:
             results.append((None, None, None, None, False, "no_event_in_window"))
             continue
-        # nearest by abs diff
         cand = cand.assign(diff=(cand["date"] - tdate).abs()).sort_values("diff")
         ev = cand.iloc[0]
-        # Alignment if event bias matches direction
         aligned = (tr["direction"] == ev["bias"])
-        results.append((ev["date"].strftime("%Y-%m-%d"), ev["bias"], ev["event_type"], ev["description"], aligned, "bias_match" if aligned else "bias_mismatch"))
+        results.append((ev["date"].strftime("%Y-%m-%d"), ev["bias"], ev["event_type"], ev["description"],
+                        aligned, "bias_match" if aligned else "bias_mismatch"))
 
     cols = ["event_date","event_bias","event_type","event_description","aligned","alignment_reason"]
     tech_df[cols] = pd.DataFrame(results, index=tech_df.index)
@@ -147,57 +149,58 @@ def main():
     cfg = load_cfg(CONFIG_PATH)
     os.makedirs("out", exist_ok=True)
 
-    # ---- Data & signals (S&P 500) ----
-    df = dl_weekly("^GSPC", years=cfg["rules"]["data"]["years"], interval=cfg["rules"]["data"]["interval"])
-    if df is None or df.empty:
-        print("Download failed or empty for ^GSPC.")
+    # Download SPY weekly
+    try:
+        df = dl_weekly(TICKER, years=cfg["rules"]["data"]["years"], interval=cfg["rules"]["data"]["interval"])
+    except Exception as e:
+        # Write a clear error so logs/artifacts show what's wrong
+        err_path = "out/error.txt"
+        with open(err_path, "w") as f:
+            f.write(f"Download failed for {TICKER}: {e}\n")
+        print(f">>> {err_path} written.")
         return
+
+    # Generate technical triggers
     tech = gen_signals_weekly(df, cfg)
     tech_df = pd.DataFrame(tech)
+    if tech_df.empty:
+        with open("out/sp500_backtest_summary_with_events.txt", "w") as f:
+            f.write("No technical triggers found for the period.\n")
+        df.to_csv("out/spy_rawdata.csv")
+        print(">>> Saved raw data; no triggers.")
+        return
 
-    # ---- Events: equities macro timeline ----
+    # Load events & align
     ev_eq = load_events(cfg["events"]["equity_csv"])
-
-    # ---- Align within ±window_days ----
     aligned = align_events(tech_df, ev_eq, cfg["events"]["window_days"])
 
-    # ---- Outputs ----
-    # 1) Full list
+    # Outputs
     full_csv = "out/sp500_backtest_triggers_with_events.csv"
     aligned.to_csv(full_csv, index=False)
 
-    # 2) Summary counts
     total = len(aligned)
-    tech_only = total
-    aligned_yes = aligned["aligned"].sum()
-    aligned_no  = tech_only - aligned_yes
-
+    aligned_yes = int(aligned["aligned"].sum())
     by_sig = aligned.groupby(["signal","direction"]).size().reset_index(name="count")
     by_aligned = aligned.groupby(["signal","direction","aligned"]).size().reset_index(name="count")
 
-    summary_lines = [
-        "Backtest: ^GSPC (S&P 500), weekly, last 10 years",
-        f"Total technical triggers: {tech_only}",
+    lines = [
+        f"Backtest: {ASSET_NAME} via {TICKER}, weekly, last {cfg['rules']['data']['years']} years",
+        f"Total technical triggers: {total}",
         f"Tech + Event aligned (±{cfg['events']['window_days']}d & bias match): {aligned_yes}",
-        f"Not aligned / no event: {aligned_no}",
-        "",
-        "Breakdown by signal & direction:",
+        f"Not aligned / no event: {total - aligned_yes}",
+        "", "Breakdown by signal & direction:"
     ]
     for _, r in by_sig.iterrows():
-        summary_lines.append(f"- {r['signal']} / {r['direction']}: {int(r['count'])}")
-
-    summary_lines.append("")
-    summary_lines.append("Alignment breakdown (signal / direction / aligned):")
+        lines.append(f"- {r['signal']} / {r['direction']}: {int(r['count'])}")
+    lines += ["", "Alignment breakdown (signal / direction / aligned):"]
     for _, r in by_aligned.iterrows():
-        summary_lines.append(f"- {r['signal']} / {r['direction']} / {bool(r['aligned'])}: {int(r['count'])}")
+        lines.append(f"- {r['signal']} / {r['direction']} / {bool(r['aligned'])}: {int(r['count'])}")
 
-    summary_txt = "\n".join(summary_lines)
     with open("out/sp500_backtest_summary_with_events.txt", "w") as f:
-        f.write(summary_txt)
+        f.write("\n".join(lines))
 
-    print(summary_txt)
+    print("\n".join(lines))
     print(f"Details CSV: {full_csv}")
 
 if __name__ == "__main__":
     main()
- 
