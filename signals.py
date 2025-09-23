@@ -100,4 +100,214 @@ def technical_signals_weekly(df, name, cfg, asset_class):
                 out.append(("bullish", f"{name}: Price within {diff:.1f}% of 200-week SMA on {last_dt}", "Near 200-wk SMA"))
             elif diff <= -cfg["rules"]["price_vs_sma200"]["break_pct"]:
                 out.append(("bullish", f"{name}: Price {diff:.1f}% below 200-week SMA on {last_dt}", "Deep below 200-wk SMA"))
-            elif diff >= cfg["rules"]["price_vs_sma200"]()
+            elif diff >= cfg["rules"]["price_vs_sma200"]["break_pct"]:
+                out.append(("bearish", f"{name}: Price {diff:.1f}% above 200-week SMA on {last_dt}", "Extended above 200-wk SMA"))
+
+    # De-dupe headlines
+    dedup = []
+    seen = set()
+    for d, h, c in out:
+        if h not in seen:
+            dedup.append((d, h, c))
+            seen.add(h)
+    return dedup
+
+# ------------------ EVENTS ------------------
+def within_days(dt, days):
+    if not isinstance(dt, datetime):
+        return False
+    return dt >= datetime.now(timezone.utc) - timedelta(days=days)
+
+def fetch_rss(url):
+    try:
+        return feedparser.parse(url)
+    except Exception:
+        return {"entries": []}
+
+def norm_text(x):
+    return (x or "").lower()
+
+def classify_event(entry, cfg):
+    """Return dict(asset->set({'bullish','bearish'})), plus macro bias for equities."""
+    txt = " ".join([
+        norm_text(entry.get("title")),
+        norm_text(entry.get("summary")),
+        norm_text(entry.get("description"))
+    ])
+    ts = entry.get("published_parsed") or entry.get("updated_parsed")
+    if ts:
+        dt = datetime(*ts[:6], tzinfo=timezone.utc)
+    else:
+        dt = datetime.now(timezone.utc)  # if missing, treat as current
+
+    if not within_days(dt, cfg["events"]["lookback_days"]):
+        return {}
+
+    k = cfg["events"]["keywords"]
+    tags = {}
+
+    # Equities macro bias
+    if any(w in txt for w in k["equity_bullish"]):
+        tags.setdefault("equity", set()).add("bullish")
+    if any(w in txt for w in k["equity_bearish"]):
+        tags.setdefault("equity", set()).add("bearish")
+
+    # Bitcoin
+    if "bitcoin" in txt or "btc" in txt or any(w in txt for w in (k["btc_bullish"] + k["btc_bearish"])):
+        if any(w in txt for w in k["btc_bullish"]):
+            tags.setdefault("btc", set()).add("bullish")
+        if any(w in txt for w in k["btc_bearish"]):
+            tags.setdefault("btc", set()).add("bearish")
+
+    # XRP / Ripple
+    if "xrp" in txt or "ripple" in txt or any(w in txt for w in (k["xrp_bullish"] + k["xrp_bearish"])):
+        if any(w in txt for w in k["xrp_bullish"]):
+            tags.setdefault("xrp", set()).add("bullish")
+        if any(w in txt for w in k["xrp_bearish"]):
+            tags.setdefault("xrp", set()).add("bearish")
+
+    # Attach short rationale from title
+    if tags:
+        tags["_why"] = entry.get("title", "")[:160]
+        tags["_when"] = dt.strftime("%Y-%m-%d")
+    return tags
+
+def pull_events(cfg):
+    sentiments = {
+        "equity": {"bullish": set(), "bearish": set()},
+        "btc": {"bullish": set(), "bearish": set()},
+        "xrp": {"bullish": set(), "bearish": set()},
+    }
+    headlines = {"equity": [], "btc": [], "xrp": []}
+
+    for feed in cfg["events"]["feeds"]:
+        parsed = fetch_rss(feed["url"])
+        for e in parsed.get("entries", []):
+            tag = classify_event(e, cfg)
+            if not tag: 
+                continue
+            why = tag.get("_why", "")
+            when = tag.get("_when", "")
+            if "equity" in tag:
+                for pol in tag["equity"]:
+                    sentiments["equity"][pol].add("1")
+                if why:
+                    headlines["equity"].append(f"[{when}] {why}")
+            if "btc" in tag:
+                for pol in tag["btc"]:
+                    sentiments["btc"][pol].add("1")
+                if why:
+                    headlines["btc"].append(f"[{when}] {why}")
+            if "xrp" in tag:
+                for pol in tag["xrp"]:
+                    sentiments["xrp"][pol].add("1")
+                if why:
+                    headlines["xrp"].append(f"[{when}] {why}")
+    return sentiments, headlines
+
+def event_alignment(asset_class, name, sentiments):
+    """
+    Map asset class to relevant sentiment bucket.
+    Return 'bullish'/'bearish'/None.
+    """
+    if asset_class == "equity":
+        pos = len(sentiments["equity"]["bullish"])
+        neg = len(sentiments["equity"]["bearish"])
+        if pos > neg:
+            return "bullish"
+        if neg > pos:
+            return "bearish"
+        return None
+    elif name.lower().startswith("bitcoin"):
+        pos = len(sentiments["btc"]["bullish"])
+        neg = len(sentiments["btc"]["bearish"])
+        if pos > neg:
+            return "bullish"
+        if neg > pos:
+            return "bearish"
+        return None
+    elif name.lower().startswith("xrp"):
+        pos = len(sentiments["xrp"]["bullish"])
+        neg = len(sentiments["xrp"]["bearish"])
+        if pos > neg:
+            return "bullish"
+        if neg > pos:
+            return "bearish"
+        return None
+    return None
+
+# ------------------ MESSAGE BUILDING ------------------
+def combine_and_decide(tech_list, ev_bias, ev_headlines, name):
+    """
+    Only alert when at least ONE strong technical signal aligns with event bias direction.
+    If no event bias (None), suppress (to avoid noise).
+    """
+    aligned = []
+    for direction, headline, ctx in tech_list:
+        if ev_bias is None:
+            continue
+        if direction == ev_bias:
+            aligned.append((direction, headline, ctx))
+
+    rationale_lines = []
+    for d, h, c in aligned:
+        rationale_lines.append(f"• {h}  | Technical: {c}  | Events: {ev_bias.upper()}")
+
+    # Add 1–2 brief event headlines as “why”
+    extras = []
+    if ev_bias and name.lower().startswith("s&p"):
+        extras = ev_headlines.get("equity", [])[:2]
+    elif name.lower().startswith("bitcoin"):
+        extras = ev_headlines.get("btc", [])[:2]
+    elif name.lower().startswith("xrp"):
+        extras = ev_headlines.get("xrp", [])[:2]
+
+    if aligned:
+        return rationale_lines, extras
+    return [], []
+
+def format_alert_block(asset_name, rationale_lines, extras):
+    msg = [f"🟢 {asset_name}" if any("bullish" in ln.lower() for ln in rationale_lines) else f"🔴 {asset_name}"]
+    msg += rationale_lines
+    if extras:
+        msg.append("Why (events):")
+        for e in extras:
+            msg.append(f"   - {e}")
+    return "\n".join(msg)
+
+# ------------------ MAIN ------------------
+def main():
+    cfg = load_cfg(CONFIG_PATH)
+
+    # Pull events first (shared for all assets)
+    sentiments, ev_headlines = pull_events(cfg)
+
+    messages = []
+    for t in cfg["tickers"]:
+        df = dl_weekly(t["symbol"], cfg["rules"]["data"]["period"], cfg["rules"]["data"]["interval"])
+        tech = technical_signals_weekly(df, t["name"], cfg, t["class"])
+        if not tech:
+            continue
+        bias = event_alignment(t["class"], t["name"], sentiments)
+        rationale, extras = combine_and_decide(tech, bias, ev_headlines, t["name"])
+        if rationale:
+            messages.append(format_alert_block(t["name"], rationale, extras))
+
+    if not messages:
+        print("No aligned (Tech + Events) alerts this run.")
+        return
+
+    header = f"📈 Long-Term Opportunity Alerts ({now_utc_iso()})"
+    body = header + "\n\n" + "\n\n".join(messages)
+    print(body)
+
+    if not CALLMEBOT_APIKEY or not WHATSAPP_PHONE:
+        print("Missing CALLMEBOT_APIKEY or WHATSAPP_PHONE. Printing instead of sending.")
+        return
+
+    status, resp = send_whatsapp(WHATSAPP_PHONE, CALLMEBOT_APIKEY, body)
+    print("CallMeBot Status:", status)
+    print("CallMeBot Response:", resp)
+
+if __name__ == "__main__":
+    main()
