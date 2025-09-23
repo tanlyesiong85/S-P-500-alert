@@ -1,0 +1,33 @@
+tickers:
+  - symbol: "^GSPC"
+    name: "S&P 500"
+
+rules:
+  rsi:
+    enabled: true
+    period: 14
+    oversold: 30
+    overbought: 70
+  macd:
+    enabled: true
+    fast: 12
+    slow: 26
+    signal: 9
+  sma_cross:
+    enabled: true
+    short: 50
+    long: 200
+  price_vs_sma200:
+    enabled: true
+    pct: 5.0     # alert if price is ±5% from 200-week SMA
+
+meta:
+  min_bars: 300
+  max_messages_per_run: 10
+
+events:
+  enabled: true
+  # Choose one:
+  mode: "manual"   # "manual" = use local CSV flags; "off" = ignore events
+  window_weeks: 2  # event must occur within ±2 weeks of the TA signal
+  flags_file: "events_flags.csv"
