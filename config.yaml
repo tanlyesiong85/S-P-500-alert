@@ -1,19 +1,9 @@
-tickers:
-  - symbol: "^GSPC"
-    name: "S&P 500"
-    class: "equity"
-  - symbol: "BTC-USD"
-    name: "Bitcoin"
-    class: "crypto"
-  - symbol: "XRP-USD"
-    name: "XRP"
-    class: "crypto"
-
+# Global settings for backtests & alerts
 rules:
   data:
-    period: "5y"        # history window
-    interval: "1wk"     # weekly candles for long-term
-    min_bars: 120       # safety (>= ~2.3 years of weeks)
+    years: 10
+    interval: "1wk"
+    min_bars: 120     # require >= ~2.3 years of weekly history
 
   rsi:
     enabled: true
@@ -28,39 +18,12 @@ rules:
 
   price_vs_sma200:
     enabled: true
-    near_pct: 5.0       # “near” 200-week zone within ±5%
-    break_pct: 8.0      # strong break beyond ±8%
+    near_pct: 5.0     # treat as "near" 200w within ±5%
+    break_pct: 8.0    # deep break beyond ±8%
 
 events:
-  lookback_days: 21     # how far back to consider “current”
-  feeds:
-    # Macro / Equities:
-    - url: "https://www.federalreserve.gov/feeds/press_all.xml"
-      scope: "macro"
-    - url: "https://www.bls.gov/feed/news_release_all.rss"
-      scope: "macro"          # CPI, jobs often appear here
-    - url: "https://www.bea.gov/rss.xml"
-      scope: "macro"          # PCE/GDP releases
-
-    # Markets / Crypto / Regulation:
-    - url: "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml"
-      scope: "crypto"
-    - url: "https://cointelegraph.com/rss"
-      scope: "crypto"
-    - url: "https://www.sec.gov/news/pressreleases.rss"
-      scope: "reg"
-
-  # Simple keyword-based sentiment tags (lowercase match on title+summary)
-  keywords:
-    equity_bullish: ["rate cut", "cuts rates", "dovish", "pause", "inflation cool", "inflation slows", "disinflation", "soft landing", "qe", "stimulus"]
-    equity_bearish: ["rate hike", "raises rates", "hawkish", "inflation hot", "higher for longer", "recession", "shutdown", "war escalation"]
-
-    btc_bullish: ["etf approval", "spot etf inflow", "institutional adoption", "custody launch", "halving", "bitcoin etf inflow", "sec approves", "blackrock", "fidelity"]
-    btc_bearish: ["etf outflow", "ban", "crackdown", "exchange hack", "regulatory action", "mining ban", "sec sues", "delisting"]
-
-    xrp_bullish: ["xrp not a security", "ripple wins", "sec settlement", "dismisses case", "court rules for ripple", "xrp relisted"]
-    xrp_bearish: ["sec wins", "xrp security", "lawsuit penalty", "injunction", "ripple loses", "xrp delisted"]
-
-notifications:
-  max_messages_per_run: 3
-  include_rationale: true
+  window_days: 14     # event must be within ±N days of the technical trigger date to count as “aligned”
+  # CSVs live under data/
+  equity_csv: "data/events_equity.csv"
+  btc_csv: "data/events_btc.csv"
+  xrp_csv: "data/events_xrp.csv"
