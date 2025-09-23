@@ -1,9 +1,9 @@
-# Global settings for backtests & alerts
+# Settings for backtests & alignment
 rules:
   data:
     years: 10
     interval: "1wk"
-    min_bars: 120     # require >= ~2.3 years of weekly history
+    min_bars: 120     # >= ~2.3 years of weeks
 
   rsi:
     enabled: true
@@ -22,8 +22,7 @@ rules:
     break_pct: 8.0    # deep break beyond ±8%
 
 events:
-  window_days: 14     # event must be within ±N days of the technical trigger date to count as “aligned”
-  # CSVs live under data/
+  window_days: 14     # event must be within ±N days of the technical trigger date
   equity_csv: "data/events_equity.csv"
   btc_csv: "data/events_btc.csv"
   xrp_csv: "data/events_xrp.csv"
