@@ -1,0 +1,25 @@
+date,asset,event_type,bias,description
+2015-12-16,SP500,Fed,bearish,Fed begins first rate hike since GFC (liftoff)
+2016-02-11,SP500,macro,bullish,Global growth fears ease after early-2016 selloff support talk
+2016-12-14,SP500,Fed,bearish,Fed hikes; signals gradual tightening
+2018-02-05,SP500,macro,bearish,Volatility shock (VIX spike) triggers market selloff
+2018-12-19,SP500,Fed,bearish,Fed hikes amid slowing growth; risk-off into year-end
+2019-07-31,SP500,Fed,bullish,Fed delivers first rate cut (mid-cycle adjustment)
+2019-10-11,SP500,macro,bullish,US-China trade truce headlines reduce tail risk
+2020-03-03,SP500,Fed,bullish,Emergency 50bp rate cut
+2020-03-15,SP500,Fed,bullish,Fed slashes rates to 0% + restarts QE
+2020-03-23,SP500,macro,bullish,Fed announces unlimited QE; credit facilities expand
+2020-03-27,SP500,stimulus,bullish,CARES Act signed (large fiscal stimulus)
+2020-06-05,SP500,macro,bullish,Surprise strong jobs rebound eases recession fears
+2020-11-09,SP500,macro,bullish,Positive vaccine efficacy news (risk-on)
+2021-06-16,SP500,Fed,bearish,Dot plot shifts hawkish on inflation
+2021-11-03,SP500,Fed,bearish,Fed announces QE taper plans
+2022-03-16,SP500,Fed,bearish,Fed starts rate hike cycle to fight inflation
+2022-06-15,SP500,Fed,bearish,75bp hike; fastest tightening since 1980s
+2022-10-13,SP500,macro,bullish,Hot CPI but capitulation intraday reversal (technical bear market flush)
+2023-03-12,SP500,macro,bullish,US authorities backstop banks (SVB/SBNY) to stabilize system
+2023-07-26,SP500,Fed,bearish,Another hike; “higher for longer” messaging
+2023-12-13,SP500,Fed,bullish,Fed signals possible pivot; markets price 2024 cuts
+2024-01-31,SP500,Fed,neutral,Fed holds; data-dependent stance
+2024-03-12,SP500,inflation,bearish,Sticky inflation concerns; policy path uncertainty
+2024-05-01,SP500,Fed,neutral,Fed holds; balance-sheet pace tweak discussed
