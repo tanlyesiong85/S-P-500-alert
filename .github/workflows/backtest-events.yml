@@ -1,7 +1,7 @@
 name: Backtest S&P500 (10y) with Events
 
 on:
-  workflow_dispatch: {}   # manual run from Actions tab
+  workflow_dispatch: {}
 
 jobs:
   backtest:
@@ -27,13 +27,15 @@ jobs:
         env:
           CONFIG_PATH: config.yaml
         run: |
-          python backtest_events.py
-          echo "---- Listing output folder (if any) ----"
-          ls -la || true
-          echo "---- Listing ./out ----"
+          mkdir -p out
+          echo ">>> Running backtest script..."
+          python backtest_events.py || true
+          echo ">>> Finished script run."
+          echo ">>> Listing project root:"
+          ls -la
+          echo ">>> Listing out folder:"
           ls -la out || true
 
-      # Upload EVERYTHING inside the out/ folder, whatever the filenames are
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
