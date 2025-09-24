@@ -1,0 +1,48 @@
+name: Backtest S&P500 (10y) with Events
+
+on:
+  workflow_dispatch: {}
+  # optional: run every Monday after the refresh committed new data
+  schedule:
+    - cron: "30 3 * * 1"   # 03:30 UTC Mondays
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -V
+          pip freeze | sed -n 1,80p
+
+      - name: Run backtest
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          echo ">>> starting backtest"
+          python backtest_events.py | tee -a out/log.txt
+          echo ">>> list out/"
+          ls -la out
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sp500-backtest-with-events
+          path: |
+            out/sp500_backtest_summary_with_events.txt
+            out/sp500_backtest_triggers_with_events.csv
+            out/log.txt
+          if-no-files-found: error
