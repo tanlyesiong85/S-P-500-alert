@@ -1,45 +1,46 @@
-name: Backtest S&P500 (10y) with Events
+name: Refresh SPY Weekly CSV
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "17 3 * * 1"   # every Monday 03:17 UTC
 
 jobs:
-  backtest:
+  refresh:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # commit the CSV back to the repo
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          set -euxo pipefail
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          python -V
+          pip install yfinance pandas
 
-      - name: Run backtest (SPY via Alpha Vantage API, fallback to yfinance)
-        env:
-          CONFIG_PATH: config.yaml
-          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+      - name: Generate data/spy_history.csv (yfinance)
         run: |
-          set -euxo pipefail
-          mkdir -p out
-          python backtest_events.py
-          echo ">>> list out/"
-          ls -la out
+          python scripts/refresh_data.py
+          echo "Preview:"
+          head -n 5 data/spy_history.csv || true
 
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sp500-backtest-with-events
-          path: out/**
-          if-no-files-found: warn
+      - name: Commit updated CSV if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- data/spy_history.csv; then
+            git add data/spy_history.csv
+            git commit -m "chore(data): refresh SPY weekly CSV [skip ci]"
+            git push
+          else
+            echo "No changes in data/spy_history.csv"
+          fi
