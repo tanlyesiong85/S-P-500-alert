@@ -1,32 +1,41 @@
-import os
-import time
-import pandas as pd
-import yfinance as yf
+name: Refresh SPY Weekly CSV
 
-OUT = "data/spy_history.csv"
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 1" # every Monday at 00:00 UTC
 
-def fetch_spy_weekly(years=15, interval="1wk", retries=4, sleep=6):
-    last_err = None
-    for i in range(1, retries + 1):
-        try:
-            print(f">>> yfinance: SPY {years}y {interval} [try {i}/{retries}]")
-            df = yf.download("SPY", period=f"{years}y", interval=interval, auto_adjust=True, progress=False)
-            if isinstance(df, pd.DataFrame) and not df.empty and "Close" in df.columns:
-                df = df.rename(columns=str.title)[["Close"]]
-                df.index.name = "Date"
-                return df
-            last_err = "empty dataframe or missing Close"
-        except Exception as e:
-            last_err = str(e)
-        time.sleep(sleep)
-    raise RuntimeError(last_err)
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-def main():
-    os.makedirs("data", exist_ok=True)
-    df = fetch_spy_weekly()
-    df = df.reset_index()  # Date, Close
-    df.to_csv(OUT, index=False)
-    print(f"Wrote {OUT} with {len(df)} rows")
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-if __name__ == "__main__":
-    main()
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas
+
+      - name: Generate data/spy_history.csv (yfinance)
+        run: |
+          python scripts/refresh_data.py
+
+      - name: Commit updated CSV if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Always stage the CSV (create or update)
+          git add -A data/spy_history.csv
+          # Commit only if something is staged
+          if git diff --cached --quiet; then
+            echo "No changes in data/spy_history.csv"
+          else
+            git commit -m "chore(data): refresh SPY weekly CSV [skip ci]"
+            git push
+          fi
