@@ -133,3 +133,108 @@ def gen_signals_weekly(df, cfg):
                     out.append({**base, "signal":"Price~SMA200", "direction":"bullish", "technical_rationale": f"Price within {dist:.1f}% of 200-week SMA (mean-revert zone)"})
                 elif dist <= -cfg["rules"]["price_vs_sma200"]["break_pct"]:
                     out.append({**base, "signal":"Price<<SMA200", "direction":"bullish", "technical_rationale": f"Price {dist:.1f}% below 200-week SMA (deep discount)"})
+                elif dist >= cfg["rules"]["price_vs_sma200"]["break_pct"]:
+                    out.append({**base, "signal":"Price>>SMA200", "direction":"bearish", "technical_rationale": f"Price {dist:.1f}% above 200-week SMA (extended)"})
+
+    return out
+
+# ------------ Event Layer ------------
+def load_events(csv_path):
+    if not os.path.exists(csv_path):
+        return pd.DataFrame(columns=["date","asset","event_type","bias","description"])
+    df = pd.read_csv(csv_path)
+    df["date"] = pd.to_datetime(df["date"])
+    df["bias"] = df["bias"].str.lower()
+    return df
+
+def align_events(tech_df, events_df, window_days):
+    if tech_df.empty:
+        return tech_df.assign(event_date=None, event_bias=None, event_type=None,
+                              event_description=None, aligned=False, alignment_reason="no_tech")
+    if events_df.empty:
+        return tech_df.assign(event_date=None, event_bias=None, event_type=None,
+                              event_description=None, aligned=False, alignment_reason="no_events")
+
+    tech_df = tech_df.copy()
+    tech_df["date_dt"] = pd.to_datetime(tech_df["date"])
+    window = pd.Timedelta(days=window_days)
+
+    e = events_df.copy().sort_values("date")
+
+    results = []
+    for _, tr in tech_df.iterrows():
+        tdate = tr["date_dt"]
+        low, high = tdate - window, tdate + window
+        cand = e[(e["date"] >= low) & (e["date"] <= high)]
+        if cand.empty:
+            results.append((None, None, None, None, False, "no_event_in_window"))
+            continue
+        cand = cand.assign(diff=(cand["date"] - tdate).abs()).sort_values("diff")
+        ev = cand.iloc[0]
+        aligned = (tr["direction"] == ev["bias"])
+        results.append((ev["date"].strftime("%Y-%m-%d"), ev["bias"], ev["event_type"], ev["description"],
+                        aligned, "bias_match" if aligned else "bias_mismatch"))
+
+    cols = ["event_date","event_bias","event_type","event_description","aligned","alignment_reason"]
+    tech_df[cols] = pd.DataFrame(results, index=tech_df.index)
+    tech_df.drop(columns=["date_dt"], inplace=True)
+    return tech_df
+
+# ------------ Main ------------
+def main():
+    cfg = load_cfg(CONFIG_PATH)
+    os.makedirs("out", exist_ok=True)
+
+    # Data (API first, fallback to yfinance)
+    try:
+        df = load_price_weekly(TICKER, years=cfg["rules"]["data"]["years"], interval=cfg["rules"]["data"]["interval"])
+    except Exception as e:
+        with open("out/error.txt", "w") as f:
+            f.write(f"Download failed for {TICKER}: {e}\n")
+        print(">>> out/error.txt written.")
+        return
+
+    # Generate technical triggers
+    tech = gen_signals_weekly(df, cfg)
+    tech_df = pd.DataFrame(tech)
+    if tech_df.empty:
+        with open("out/sp500_backtest_summary_with_events.txt", "w") as f:
+            f.write("No technical triggers found for the period.\n")
+        df.to_csv("out/spy_rawdata.csv")
+        print(">>> Saved raw data; no triggers.")
+        return
+
+    # Load events & align
+    ev_eq = load_events(cfg["events"]["equity_csv"])
+    aligned = align_events(tech_df, ev_eq, cfg["events"]["window_days"])
+
+    # Outputs
+    full_csv = "out/sp500_backtest_triggers_with_events.csv"
+    aligned.to_csv(full_csv, index=False)
+
+    total = len(aligned)
+    aligned_yes = int(aligned["aligned"].sum())
+    by_sig = aligned.groupby(["signal","direction"]).size().reset_index(name="count")
+    by_aligned = aligned.groupby(["signal","direction","aligned"]).size().reset_index(name="count")
+
+    lines = [
+        f"Backtest: {ASSET_NAME} via {TICKER}, weekly, last {cfg['rules']['data']['years']} years",
+        f"Total technical triggers: {total}",
+        f"Tech + Event aligned (±{cfg['events']['window_days']}d & bias match): {aligned_yes}",
+        f"Not aligned / no event: {total - aligned_yes}",
+        "", "Breakdown by signal & direction:"
+    ]
+    for _, r in by_sig.iterrows():
+        lines.append(f"- {r['signal']} / {r['direction']}: {int(r['count'])}")
+    lines += ["", "Alignment breakdown (signal / direction / aligned):"]
+    for _, r in by_aligned.iterrows():
+        lines.append(f"- {r['signal']} / {r['direction']} / {bool(r['aligned'])}: {int(r['count'])}")
+
+    with open("out/sp500_backtest_summary_with_events.txt", "w") as f:
+        f.write("\n".join(lines))
+
+    print("\n".join(lines))
+    print(f"Details CSV: {full_csv}")
+
+if __name__ == "__main__":
+    main()
