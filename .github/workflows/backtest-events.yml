@@ -25,9 +25,10 @@ jobs:
           pip install -r requirements.txt
           python -V
 
-      - name: Run backtest (SPY proxy for S&P 500)
+      - name: Run backtest (SPY via Alpha Vantage API, fallback to yfinance)
         env:
           CONFIG_PATH: config.yaml
+          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
         run: |
           set -euxo pipefail
           mkdir -p out
